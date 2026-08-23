@@ -19,6 +19,7 @@ android {
             minifyEnabled true
             proguardFiles getDefaultProguardFile('proguard-android-optimize.txt')
         }
+
         debug {
             minifyEnabled false
         }
