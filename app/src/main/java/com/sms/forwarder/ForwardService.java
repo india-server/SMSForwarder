@@ -24,46 +24,30 @@ import okhttp3.Response;
 
 public class ForwardService extends Service {
 
-    private static final String TAG =
-            "ForwardService";
-
-    private static final String CHANNEL_ID =
-            "sms_forwarder";
+    private static final String TAG = "ForwardService";
+    private static final String CHANNEL_ID = "sms_forwarder";
 
     private static final MediaType JSON =
-            MediaType.parse(
-                    "application/json; charset=utf-8"
-            );
+            MediaType.parse("application/json; charset=utf-8");
 
-    private final OkHttpClient client =
-            new OkHttpClient.Builder()
-                    .connectTimeout(
-                            15,
-                            TimeUnit.SECONDS
-                    )
-                    .writeTimeout(
-                            15,
-                            TimeUnit.SECONDS
-                    )
-                    .readTimeout(
-                            30,
-                            TimeUnit.SECONDS
-                    )
-                    .build();
+    private final OkHttpClient client = new OkHttpClient.Builder()
+            .connectTimeout(15, TimeUnit.SECONDS)
+            .writeTimeout(15, TimeUnit.SECONDS)
+            .readTimeout(30, TimeUnit.SECONDS)
+            .build();
 
     @Override
     public void onCreate() {
-
         super.onCreate();
 
         createNotificationChannel();
 
         startForeground(
                 1,
-                buildNotification(
-                        "SMS Forwarder Active"
-                )
+                buildNotification("SMS Forwarder Active")
         );
+
+        Log.d(TAG, "Service created");
     }
 
     @Override
@@ -73,19 +57,15 @@ public class ForwardService extends Service {
             int startId
     ) {
 
-        if (intent != null &&
-                intent.hasExtra("sender") &&
-                intent.hasExtra("body")) {
+        if (intent != null
+                && intent.hasExtra("sender")
+                && intent.hasExtra("body")) {
 
             String sender =
-                    intent.getStringExtra(
-                            "sender"
-                    );
+                    intent.getStringExtra("sender");
 
             String body =
-                    intent.getStringExtra(
-                            "body"
-                    );
+                    intent.getStringExtra("body");
 
             SharedPreferences prefs =
                     getSharedPreferences(
@@ -96,27 +76,34 @@ public class ForwardService extends Service {
             String apiUrl =
                     prefs.getString(
                             "api_url",
-                            "https://backend.aerivue.dev/api/messages"
+                            "https://smssend-8ek4.onrender.com/api/messages"
                     );
 
             String deviceId =
                     prefs.getString(
                             "device_id",
-                            "unknown"
+                            Build.MODEL
                     );
 
-            if (sender != null &&
-                    body != null &&
-                    !sender.isEmpty() &&
-                    !body.isEmpty()) {
+            String phoneNumber =
+                    prefs.getString(
+                            "phone_number",
+                            ""
+                    );
 
-                forwardMessage(
-                        apiUrl,
-                        sender,
-                        body,
-                        deviceId
-                );
-            }
+            Log.d(
+                    TAG,
+                    "Processing SMS | sender=" + sender
+                            + " | phone=" + phoneNumber
+            );
+
+            forwardMessage(
+                    apiUrl,
+                    sender,
+                    body,
+                    deviceId,
+                    phoneNumber
+            );
         }
 
         return START_STICKY;
@@ -126,67 +113,65 @@ public class ForwardService extends Service {
             String apiUrl,
             String sender,
             String body,
-            String deviceId
+            String deviceId,
+            String phoneNumber
     ) {
 
-        String json =
+        String json = String.format(
                 "{"
-                        + "\"sender\":\""
-                        + escapeJson(sender)
-                        + "\","
-                        + "\"message\":\""
-                        + escapeJson(body)
-                        + "\","
-                        + "\"deviceId\":\""
-                        + escapeJson(deviceId)
-                        + "\""
-                        + "}";
+                        + "\"sender\":\"%s\","
+                        + "\"message\":\"%s\","
+                        + "\"deviceId\":\"%s\","
+                        + "\"phoneNumber\":\"%s\""
+                        + "}",
+                escapeJson(sender),
+                escapeJson(body),
+                escapeJson(deviceId),
+                escapeJson(phoneNumber)
+        );
 
-        RequestBody requestBody =
-                RequestBody.create(
-                        json,
-                        JSON
-                );
-
-        Request request =
-                new Request.Builder()
-                        .url(apiUrl)
-                        .post(requestBody)
-                        .addHeader(
-                                "Content-Type",
-                                "application/json"
+        Request request = new Request.Builder()
+                .url(apiUrl)
+                .post(
+                        RequestBody.create(
+                                json,
+                                JSON
                         )
-                        .build();
+                )
+                .addHeader(
+                        "Content-Type",
+                        "application/json"
+                )
+                .build();
 
         new Thread(() -> {
 
             try (Response response =
-                         client.newCall(request)
-                                 .execute()) {
+                         client.newCall(request).execute()) {
 
                 if (response.isSuccessful()) {
 
                     Log.d(
                             TAG,
-                            "SMS forwarded successfully"
+                            "SMS forwarded successfully | "
+                                    + "sender=" + sender
                     );
 
                 } else {
 
-                    String errorBody = "";
+                    String responseBody = "";
 
                     if (response.body() != null) {
-                        errorBody =
-                                response.body()
-                                        .string();
+                        responseBody =
+                                response.body().string();
                     }
 
                     Log.e(
                             TAG,
-                            "Forward failed: "
+                            "Forward failed | HTTP "
                                     + response.code()
                                     + " | "
-                                    + errorBody
+                                    + responseBody
                     );
                 }
 
@@ -194,7 +179,7 @@ public class ForwardService extends Service {
 
                 Log.e(
                         TAG,
-                        "Network error",
+                        "Network error while forwarding SMS",
                         e
                 );
             }
@@ -218,16 +203,18 @@ public class ForwardService extends Service {
 
     private void createNotificationChannel() {
 
-        if (Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.O) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
 
             NotificationChannel channel =
                     new NotificationChannel(
                             CHANNEL_ID,
                             "SMS Forwarder",
-                            NotificationManager
-                                    .IMPORTANCE_LOW
+                            NotificationManager.IMPORTANCE_LOW
                     );
+
+            channel.setDescription(
+                    "SMS Forwarder background service"
+            );
 
             NotificationManager manager =
                     getSystemService(
@@ -235,22 +222,15 @@ public class ForwardService extends Service {
                     );
 
             if (manager != null) {
-                manager.createNotificationChannel(
-                        channel
-                );
+                manager.createNotificationChannel(channel);
             }
         }
     }
 
-    private Notification buildNotification(
-            String text
-    ) {
+    private Notification buildNotification(String text) {
 
         Intent intent =
-                new Intent(
-                        this,
-                        MainActivity.class
-                );
+                new Intent(this, MainActivity.class);
 
         PendingIntent pendingIntent =
                 PendingIntent.getActivity(
@@ -265,25 +245,19 @@ public class ForwardService extends Service {
                 this,
                 CHANNEL_ID
         )
-                .setContentTitle(
-                        "📨 SMS Forwarder"
-                )
+                .setContentTitle("📨 SMS Forwarder")
                 .setContentText(text)
                 .setSmallIcon(
-                        android.R.drawable
-                                .ic_menu_report_image
+                        android.R.drawable.ic_menu_report_image
                 )
-                .setContentIntent(
-                        pendingIntent
-                )
+                .setContentIntent(pendingIntent)
                 .setOngoing(true)
+                .setAutoCancel(false)
                 .build();
     }
 
     @Override
-    public IBinder onBind(
-            Intent intent
-    ) {
+    public IBinder onBind(Intent intent) {
         return null;
     }
 }
