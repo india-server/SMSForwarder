@@ -22,15 +22,18 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Generate Gradle Wrapper
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.2'
+
+      - name: Create local.properties
         run: |
-          gradle wrapper --gradle-version 8.7
+          echo "sdk.dir=$ANDROID_HOME" > local.properties
 
       - name: Build APK
         run: |
-          echo "sdk.dir=$ANDROID_HOME" > local.properties
-          chmod +x gradlew
-          ./gradlew assembleDebug
+          gradle assembleDebug
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
