@@ -1,8 +1,9 @@
-name: Build APK Direct
+name: Build APK
 
 on:
   push:
-    branches: [ main ]
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
@@ -10,63 +11,34 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-    - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v5
-      with:
-        java-version: '17'
-        distribution: 'temurin'
+      - name: Set up JDK 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
 
-    - name: Install Android SDK
-      run: |
-        mkdir -p $HOME/android-sdk/cmdline-tools
-        wget -q https://dl.google.com/android/repository/commandlinetools-linux-11076708_latest.zip
-        unzip -q commandlinetools-linux-*.zip
-        mv cmdline-tools $HOME/android-sdk/cmdline-tools/latest
-        export ANDROID_SDK_ROOT=$HOME/android-sdk
-        export PATH=$PATH:$ANDROID_SDK_ROOT/cmdline-tools/latest/bin
-        yes | sdkmanager "platform-tools" "platforms;android-34" "build-tools;34.0.0"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
 
-    - name: Build APK
-      run: |
-        export ANDROID_SDK_ROOT=$HOME/android-sdk
-        export PATH=$PATH:$ANDROID_SDK_ROOT/platform-tools
-        export PATH=$PATH:$ANDROID_SDK_ROOT/build-tools/34.0.0
-        
-        # Create output directories
-        mkdir -p app/build/classes app/build/dex
-        
-        # Compile Java
-        javac -d app/build/classes \
-          -cp "$ANDROID_SDK_ROOT/platforms/android-34/android.jar" \
-          app/src/main/java/com/sms/forwarder/*.java
-        
-        # Convert to DEX
-        dx --dex --output=app/build/dex/classes.dex app/build/classes/
-        
-        # Package APK
-        aapt package -f -M app/src/main/AndroidManifest.xml \
-          -I "$ANDROID_SDK_ROOT/platforms/android-34/android.jar" \
-          -S app/src/main/res \
-          -F app/build/sms-forwarder-unsigned.apk
-        
-        # Add DEX to APK
-        cd app/build
-        zip -j sms-forwarder-unsigned.apk dex/classes.dex
-        cd ../..
-        
-        # Sign APK (debug keystore)
-        apksigner sign --ks "$ANDROID_SDK_ROOT/platform-tools/lib/keystore/debug.keystore" \
-          --ks-pass pass:android \
-          --key-pass pass:android \
-          app/build/sms-forwarder-unsigned.apk
-        
-        # Rename final APK
-        mv app/build/sms-forwarder-unsigned.apk SMSForwarder.apk
+      - name: Check project
+        run: |
+          pwd
+          ls -la
+          find . -maxdepth 2 -type f | sort
 
-    - name: Upload APK
-      uses: actions/upload-artifact@v4
-      with:
-        name: SMSForwarder
-        path: SMSForwarder.apk
+      - name: Make Gradle executable
+        run: chmod +x ./gradlew
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-debug
+          path: |
+            **/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
