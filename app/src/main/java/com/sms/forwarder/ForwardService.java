@@ -7,6 +7,7 @@ import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
 import android.content.SharedPreferences;
+import android.os.BatteryManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -14,7 +15,8 @@ import android.util.Log;
 import androidx.core.app.NotificationCompat;
 
 import java.io.IOException;
-import java.util.UUID;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
 
 import okhttp3.MediaType;
@@ -25,37 +27,85 @@ import okhttp3.Response;
 
 public class ForwardService extends Service {
 
-    private static final String TAG = "ForwardService";
-    private static final String CHANNEL_ID = "sms_forwarder";
+    private static final String TAG =
+            "ForwardService";
 
-    private static final String DEFAULT_API =
-            "https://smssend-8ek4.onrender.com";
+    private static final String CHANNEL_ID =
+            "sms_forwarder";
+
+    private static final int NOTIFICATION_ID =
+            1;
+
+    private static final long HEARTBEAT_INTERVAL_SECONDS =
+            60;
+
+    private static final String DEFAULT_API_URL =
+            "https://smssend-8ek4.onrender.com/api/messages";
 
     private static final MediaType JSON =
-            MediaType.parse("application/json; charset=utf-8");
+            MediaType.parse(
+                    "application/json; charset=utf-8"
+            );
 
     private final OkHttpClient client =
             new OkHttpClient.Builder()
-                    .connectTimeout(15, TimeUnit.SECONDS)
-                    .writeTimeout(15, TimeUnit.SECONDS)
-                    .readTimeout(30, TimeUnit.SECONDS)
+                    .connectTimeout(
+                            15,
+                            TimeUnit.SECONDS
+                    )
+                    .writeTimeout(
+                            15,
+                            TimeUnit.SECONDS
+                    )
+                    .readTimeout(
+                            30,
+                            TimeUnit.SECONDS
+                    )
                     .build();
+
+    private ScheduledExecutorService scheduler;
 
     @Override
     public void onCreate() {
+
         super.onCreate();
 
         createNotificationChannel();
 
         startForeground(
-                1,
-                buildNotification("SMS Forwarder Active")
+                NOTIFICATION_ID,
+                buildNotification(
+                        "SMS Forwarder Active"
+                )
         );
 
-        Log.d(TAG, "Service created");
+        /*
+         * Create scheduler.
+         */
+        scheduler =
+                Executors.newSingleThreadScheduledExecutor();
 
-        // Register/update device when service starts.
-        sendHeartbeat();
+        /*
+         * Send first heartbeat immediately.
+         */
+        scheduler.execute(
+                this::sendHeartbeat
+        );
+
+        /*
+         * Continue heartbeat every 60 seconds.
+         */
+        scheduler.scheduleAtFixedRate(
+                this::sendHeartbeat,
+                HEARTBEAT_INTERVAL_SECONDS,
+                HEARTBEAT_INTERVAL_SECONDS,
+                TimeUnit.SECONDS
+        );
+
+        Log.d(
+                TAG,
+                "Service created | heartbeat started"
+        );
     }
 
     @Override
@@ -65,6 +115,9 @@ public class ForwardService extends Service {
             int startId
     ) {
 
+        /*
+         * SMS receiver sends sender + body.
+         */
         if (intent != null
                 && intent.hasExtra("sender")
                 && intent.hasExtra("body")) {
@@ -75,20 +128,73 @@ public class ForwardService extends Service {
             String body =
                     intent.getStringExtra("body");
 
+            if (sender != null
+                    && body != null
+                    && !body.isEmpty()) {
+
+                Log.d(
+                        TAG,
+                        "SMS received | sender="
+                                + sender
+                );
+
+                forwardMessage(
+                        sender,
+                        body
+                );
+
+                /*
+                 * Refresh device status
+                 * immediately after SMS.
+                 */
+                sendHeartbeat();
+            }
+        }
+
+        return START_STICKY;
+    }
+
+    /**
+     * Send device heartbeat.
+     */
+    private void sendHeartbeat() {
+
+        try {
+
             SharedPreferences prefs =
                     getSharedPreferences(
                             "config",
                             MODE_PRIVATE
                     );
 
-            String apiBase =
+            String apiUrl =
                     prefs.getString(
                             "api_url",
-                            DEFAULT_API + "/api/messages"
+                            DEFAULT_API_URL
                     );
 
+            String baseUrl =
+                    getBaseUrl(apiUrl);
+
+            String heartbeatUrl =
+                    baseUrl +
+                            "/api/devices/heartbeat";
+
             String deviceId =
-                    getDeviceId(prefs);
+                    prefs.getString(
+                            "device_id",
+                            ""
+                    );
+
+            if (deviceId.isEmpty()) {
+
+                Log.w(
+                        TAG,
+                        "Heartbeat skipped: device ID missing"
+                );
+
+                return;
+            }
 
             String phoneNumber =
                     prefs.getString(
@@ -96,167 +202,96 @@ public class ForwardService extends Service {
                             ""
                     );
 
-            Log.d(
-                    TAG,
-                    "Processing SMS | sender="
-                            + sender
-                            + " | device="
-                            + deviceId
-            );
+            String model =
+                    Build.MODEL != null
+                            ? Build.MODEL
+                            : "";
 
-            forwardMessage(
-                    apiBase,
-                    sender,
-                    body,
-                    deviceId,
-                    phoneNumber
-            );
+            String manufacturer =
+                    Build.MANUFACTURER != null
+                            ? Build.MANUFACTURER
+                            : "";
 
-            // Also update device status.
-            sendHeartbeat();
-        }
+            String androidVersion =
+                    Build.VERSION.RELEASE != null
+                            ? Build.VERSION.RELEASE
+                            : "";
 
-        return START_STICKY;
-    }
+            String appVersion =
+                    getAppVersion();
 
-    /**
-     * Gets an app-scoped device ID.
-     *
-     * Do not use Build.MODEL as the unique ID because
-     * multiple phones can have the same model.
-     */
-    private String getDeviceId(
-            SharedPreferences prefs
-    ) {
+            int batteryLevel =
+                    getBatteryLevel();
 
-        String existing =
-                prefs.getString(
-                        "device_id",
-                        ""
-                );
+            boolean charging =
+                    isCharging();
 
-        if (existing != null
-                && !existing.trim().isEmpty()) {
+            String json =
+                    "{"
+                            + "\"deviceId\":\""
+                            + escapeJson(deviceId)
+                            + "\","
 
-            return existing.trim();
-        }
+                            + "\"phoneNumber\":\""
+                            + escapeJson(phoneNumber)
+                            + "\","
 
-        String generated =
-                UUID.randomUUID().toString();
+                            + "\"model\":\""
+                            + escapeJson(model)
+                            + "\","
 
-        prefs.edit()
-                .putString(
-                        "device_id",
-                        generated
-                )
-                .apply();
+                            + "\"manufacturer\":\""
+                            + escapeJson(manufacturer)
+                            + "\","
 
-        return generated;
-    }
+                            + "\"androidVersion\":\""
+                            + escapeJson(androidVersion)
+                            + "\","
 
-    /**
-     * Sends device information to:
-     * POST /api/devices/heartbeat
-     */
-    private void sendHeartbeat() {
+                            + "\"appVersion\":\""
+                            + escapeJson(appVersion)
+                            + "\","
 
-        SharedPreferences prefs =
-                getSharedPreferences(
-                        "config",
-                        MODE_PRIVATE
-                );
+                            + "\"batteryLevel\":"
+                            + batteryLevel
+                            + ","
 
-        String apiUrl =
-                prefs.getString(
-                        "api_url",
-                        DEFAULT_API + "/api/messages"
-                );
+                            + "\"isCharging\":"
+                            + charging
 
-        String baseUrl = extractBaseUrl(apiUrl);
+                            + "}";
 
-        String heartbeatUrl =
-                baseUrl + "/api/devices/heartbeat";
+            RequestBody body =
+                    RequestBody.create(
+                            json,
+                            JSON
+                    );
 
-        String deviceId =
-                getDeviceId(prefs);
-
-        String phoneNumber =
-                prefs.getString(
-                        "phone_number",
-                        ""
-                );
-
-        String model =
-                Build.MODEL != null
-                        ? Build.MODEL
-                        : "";
-
-        String manufacturer =
-                Build.MANUFACTURER != null
-                        ? Build.MANUFACTURER
-                        : "";
-
-        String androidVersion =
-                Build.VERSION.RELEASE != null
-                        ? Build.VERSION.RELEASE
-                        : "";
-
-        String appVersion =
-                getAppVersion();
-
-        String json =
-                "{"
-                        + "\"deviceId\":\""
-                        + escapeJson(deviceId)
-                        + "\","
-
-                        + "\"phoneNumber\":\""
-                        + escapeJson(phoneNumber)
-                        + "\","
-
-                        + "\"model\":\""
-                        + escapeJson(model)
-                        + "\","
-
-                        + "\"manufacturer\":\""
-                        + escapeJson(manufacturer)
-                        + "\","
-
-                        + "\"androidVersion\":\""
-                        + escapeJson(androidVersion)
-                        + "\","
-
-                        + "\"appVersion\":\""
-                        + escapeJson(appVersion)
-                        + "\""
-                        + "}";
-
-        Request request =
-                new Request.Builder()
-                        .url(heartbeatUrl)
-                        .post(
-                                RequestBody.create(
-                                        json,
-                                        JSON
-                                )
-                        )
-                        .addHeader(
-                                "Content-Type",
-                                "application/json"
-                        )
-                        .build();
-
-        new Thread(() -> {
+            Request request =
+                    new Request.Builder()
+                            .url(heartbeatUrl)
+                            .post(body)
+                            .addHeader(
+                                    "Content-Type",
+                                    "application/json"
+                            )
+                            .build();
 
             try (Response response =
-                         client.newCall(request).execute()) {
+                         client
+                                 .newCall(request)
+                                 .execute()) {
 
                 if (response.isSuccessful()) {
 
                     Log.d(
                             TAG,
-                            "Heartbeat successful | device="
+                            "Heartbeat OK | device="
                                     + deviceId
+                                    + " | battery="
+                                    + batteryLevel
+                                    + "% | charging="
+                                    + charging
                     );
 
                 } else {
@@ -264,6 +299,7 @@ public class ForwardService extends Service {
                     String responseBody = "";
 
                     if (response.body() != null) {
+
                         responseBody =
                                 response.body().string();
                     }
@@ -276,71 +312,109 @@ public class ForwardService extends Service {
                                     + responseBody
                     );
                 }
+            }
 
-            } catch (Exception e) {
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Heartbeat error",
+                    e
+            );
+        }
+    }
+
+    /**
+     * Forward SMS message.
+     */
+    private void forwardMessage(
+            String sender,
+            String message
+    ) {
+
+        try {
+
+            SharedPreferences prefs =
+                    getSharedPreferences(
+                            "config",
+                            MODE_PRIVATE
+                    );
+
+            String apiUrl =
+                    prefs.getString(
+                            "api_url",
+                            DEFAULT_API_URL
+                    );
+
+            String deviceId =
+                    prefs.getString(
+                            "device_id",
+                            ""
+                    );
+
+            String phoneNumber =
+                    prefs.getString(
+                            "phone_number",
+                            ""
+                    );
+
+            if (deviceId.isEmpty()) {
 
                 Log.e(
                         TAG,
-                        "Heartbeat network error",
-                        e
+                        "SMS forwarding skipped: "
+                                + "device ID missing"
                 );
+
+                return;
             }
 
-        }).start();
-    }
+            String json =
+                    "{"
+                            + "\"sender\":\""
+                            + escapeJson(sender)
+                            + "\","
 
-    private void forwardMessage(
-            String apiUrl,
-            String sender,
-            String body,
-            String deviceId,
-            String phoneNumber
-    ) {
+                            + "\"message\":\""
+                            + escapeJson(message)
+                            + "\","
 
-        String json =
-                "{"
-                        + "\"sender\":\""
-                        + escapeJson(sender)
-                        + "\","
+                            + "\"deviceId\":\""
+                            + escapeJson(deviceId)
+                            + "\","
 
-                        + "\"message\":\""
-                        + escapeJson(body)
-                        + "\","
+                            + "\"phoneNumber\":\""
+                            + escapeJson(phoneNumber)
+                            + "\""
+                            + "}";
 
-                        + "\"deviceId\":\""
-                        + escapeJson(deviceId)
-                        + "\","
+            RequestBody body =
+                    RequestBody.create(
+                            json,
+                            JSON
+                    );
 
-                        + "\"phoneNumber\":\""
-                        + escapeJson(phoneNumber)
-                        + "\""
-                        + "}";
-
-        Request request =
-                new Request.Builder()
-                        .url(apiUrl)
-                        .post(
-                                RequestBody.create(
-                                        json,
-                                        JSON
-                                )
-                        )
-                        .addHeader(
-                                "Content-Type",
-                                "application/json"
-                        )
-                        .build();
-
-        new Thread(() -> {
+            Request request =
+                    new Request.Builder()
+                            .url(apiUrl)
+                            .post(body)
+                            .addHeader(
+                                    "Content-Type",
+                                    "application/json"
+                            )
+                            .build();
 
             try (Response response =
-                         client.newCall(request).execute()) {
+                         client
+                                 .newCall(request)
+                                 .execute()) {
 
                 if (response.isSuccessful()) {
 
                     Log.d(
                             TAG,
                             "SMS forwarded successfully | "
+                                    + "sender="
                                     + sender
                     );
 
@@ -349,67 +423,148 @@ public class ForwardService extends Service {
                     String responseBody = "";
 
                     if (response.body() != null) {
+
                         responseBody =
                                 response.body().string();
                     }
 
                     Log.e(
                             TAG,
-                            "Forward failed | HTTP "
+                            "SMS forward failed | HTTP "
                                     + response.code()
                                     + " | "
                                     + responseBody
                     );
                 }
-
-            } catch (IOException e) {
-
-                Log.e(
-                        TAG,
-                        "Network error while forwarding SMS",
-                        e
-                );
             }
 
-        }).start();
+        } catch (IOException e) {
+
+            Log.e(
+                    TAG,
+                    "Network error while forwarding SMS",
+                    e
+            );
+        }
     }
 
-    private String extractBaseUrl(
+    /**
+     * Get battery percentage.
+     */
+    private int getBatteryLevel() {
+
+        try {
+
+            BatteryManager batteryManager =
+                    (BatteryManager)
+                            getSystemService(
+                                    BATTERY_SERVICE
+                            );
+
+            if (batteryManager != null) {
+
+                int level =
+                        batteryManager.getIntProperty(
+                                BatteryManager.BATTERY_PROPERTY_CAPACITY
+                        );
+
+                if (level >= 0
+                        && level <= 100) {
+
+                    return level;
+                }
+            }
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Unable to read battery",
+                    e
+            );
+        }
+
+        return 0;
+    }
+
+    /**
+     * Check charging state.
+     */
+    private boolean isCharging() {
+
+        try {
+
+            BatteryManager batteryManager =
+                    (BatteryManager)
+                            getSystemService(
+                                    BATTERY_SERVICE
+                            );
+
+            if (batteryManager != null
+                    && Build.VERSION.SDK_INT >=
+                    Build.VERSION_CODES.M) {
+
+                return batteryManager.isCharging();
+            }
+
+        } catch (Exception e) {
+
+            Log.e(
+                    TAG,
+                    "Unable to read charging state",
+                    e
+            );
+        }
+
+        return false;
+    }
+
+    /**
+     * Extract base URL.
+     *
+     * https://example.com/api/messages
+     *
+     * ->
+     *
+     * https://example.com
+     */
+    private String getBaseUrl(
             String apiUrl
     ) {
 
-        if (apiUrl == null
-                || apiUrl.trim().isEmpty()) {
-
-            return DEFAULT_API;
-        }
-
-        String url =
+        String baseUrl =
                 apiUrl.trim();
 
         String marker =
                 "/api/messages";
 
         int index =
-                url.indexOf(marker);
+                baseUrl.indexOf(marker);
 
         if (index >= 0) {
-            return url.substring(
-                    0,
-                    index
-            );
+
+            baseUrl =
+                    baseUrl.substring(
+                            0,
+                            index
+                    );
         }
 
-        if (url.endsWith("/")) {
-            return url.substring(
-                    0,
-                    url.length() - 1
-            );
+        while (baseUrl.endsWith("/")) {
+
+            baseUrl =
+                    baseUrl.substring(
+                            0,
+                            baseUrl.length() - 1
+                    );
         }
 
-        return url;
+        return baseUrl;
     }
 
+    /**
+     * App version.
+     */
     private String getAppVersion() {
 
         try {
@@ -423,10 +578,13 @@ public class ForwardService extends Service {
 
         } catch (Exception e) {
 
-            return "unknown";
+            return "1.0";
         }
     }
 
+    /**
+     * JSON escaping.
+     */
     private String escapeJson(
             String value
     ) {
@@ -443,6 +601,9 @@ public class ForwardService extends Service {
                 .replace("\t", "\\t");
     }
 
+    /**
+     * Notification channel.
+     */
     private void createNotificationChannel() {
 
         if (Build.VERSION.SDK_INT >=
@@ -452,7 +613,8 @@ public class ForwardService extends Service {
                     new NotificationChannel(
                             CHANNEL_ID,
                             "SMS Forwarder",
-                            NotificationManager.IMPORTANCE_LOW
+                            NotificationManager
+                                    .IMPORTANCE_LOW
                     );
 
             channel.setDescription(
@@ -465,6 +627,7 @@ public class ForwardService extends Service {
                     );
 
             if (manager != null) {
+
                 manager.createNotificationChannel(
                         channel
                 );
@@ -472,6 +635,9 @@ public class ForwardService extends Service {
         }
     }
 
+    /**
+     * Foreground notification.
+     */
     private Notification buildNotification(
             String text
     ) {
@@ -512,9 +678,27 @@ public class ForwardService extends Service {
     }
 
     @Override
+    public void onDestroy() {
+
+        Log.d(
+                TAG,
+                "Service destroyed"
+        );
+
+        if (scheduler != null) {
+
+            scheduler.shutdownNow();
+            scheduler = null;
+        }
+
+        super.onDestroy();
+    }
+
+    @Override
     public IBinder onBind(
             Intent intent
     ) {
+
         return null;
     }
 }
