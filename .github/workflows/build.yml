@@ -1,4 +1,4 @@
-name: Build APK
+name: Build APK Direct
 
 on:
   push:
@@ -17,28 +17,118 @@ jobs:
       - name: Set up JDK 17
         uses: actions/setup-java@v5
         with:
-          distribution: temurin
-          java-version: '17'
+          java-version: "17"
+          distribution: "temurin"
 
-      - name: Set up Android SDK
+      - name: Install Android SDK
         uses: android-actions/setup-android@v3
+
+      - name: Install Android packages
+        run: |
+          yes | sdkmanager --licenses > /dev/null || true
+          sdkmanager \
+            "platform-tools" \
+            "platforms;android-34" \
+            "build-tools;34.0.0"
+
+      - name: Show Android tools
+        run: |
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          echo "Build tools:"
+          ls -la "$ANDROID_SDK_ROOT/build-tools/34.0.0"
+          echo "AAPT:"
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt" version
+          echo "D8:"
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/d8" --version
+          echo "APKSigner:"
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner" version
 
       - name: Check project
         run: |
-          pwd
-          ls -la
-          find . -maxdepth 2 -type f | sort
+          echo "Project files:"
+          find app -maxdepth 5 -type f | sort
 
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
+      - name: Prepare build directories
+        run: |
+          rm -rf app/build
+          mkdir -p app/build/classes
+          mkdir -p app/build/dex
+          mkdir -p app/build/unsigned
 
-      - name: Build Debug APK
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      - name: Compile Java
+        run: |
+          javac \
+            -source 8 \
+            -target 8 \
+            -encoding UTF-8 \
+            -d app/build/classes \
+            -cp "$ANDROID_SDK_ROOT/platforms/android-34/android.jar" \
+            $(find app/src/main/java -name "*.java")
+
+      - name: Convert Java classes to DEX
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/d8" \
+            --lib "$ANDROID_SDK_ROOT/platforms/android-34/android.jar" \
+            --output app/build/dex \
+            $(find app/build/classes -name "*.class")
+
+      - name: Package APK
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/aapt" package \
+            -f \
+            -M app/src/main/AndroidManifest.xml \
+            -I "$ANDROID_SDK_ROOT/platforms/android-34/android.jar" \
+            -S app/src/main/res \
+            -F app/build/unsigned/SMSForwarder-unsigned.apk
+
+      - name: Add DEX to APK
+        run: |
+          cd app/build/unsigned
+          unzip -q SMSForwarder-unsigned.apk -d extracted
+          cp ../dex/classes.dex extracted/classes.dex
+          cd extracted
+          zip -qr ../SMSForwarder-unsigned.apk .
+          cd ../../..
+
+      - name: Create signing key
+        run: |
+          mkdir -p app/build/keystore
+
+          keytool \
+            -genkeypair \
+            -v \
+            -keystore app/build/keystore/debug.keystore \
+            -alias androiddebugkey \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -storepass android \
+            -keypass android \
+            -dname "CN=Android Debug,O=Android,C=US"
+
+      - name: Sign APK
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner" sign \
+            --ks app/build/keystore/debug.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out app/build/SMSForwarder.apk \
+            app/build/unsigned/SMSForwarder-unsigned.apk
+
+      - name: Verify APK
+        run: |
+          "$ANDROID_SDK_ROOT/build-tools/34.0.0/apksigner" verify \
+            --verbose \
+            app/build/SMSForwarder.apk
+
+      - name: Show APK
+        run: |
+          ls -lh app/build/SMSForwarder.apk
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: app-debug
-          path: |
-            **/build/outputs/apk/debug/*.apk
+          name: SMSForwarder
+          path: app/build/SMSForwarder.apk
           if-no-files-found: error
