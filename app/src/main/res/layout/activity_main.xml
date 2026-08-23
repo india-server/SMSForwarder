@@ -4,7 +4,8 @@
     xmlns:android="http://schemas.android.com/apk/res/android"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
-    android:background="#0B0D10">
+    android:fillViewport="true"
+    android:background="#0F0F12">
 
     <LinearLayout
         android:layout_width="match_parent"
@@ -12,104 +13,209 @@
         android:orientation="vertical"
         android:padding="24dp">
 
+        <!-- Header -->
+
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="SMS Forwarder"
+            android:text="📨 SMS Forwarder"
             android:textColor="#FFFFFF"
             android:textSize="28sp"
-            android:textStyle="bold"/>
+            android:textStyle="bold"
+            android:layout_marginBottom="6dp"/>
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="6dp"
-            android:text="Device setup"
-            android:textColor="#8C95A3"
-            android:textSize="14sp"/>
+            android:text="Configure your device"
+            android:textColor="#888888"
+            android:textSize="14sp"
+            android:layout_marginBottom="28dp"/>
 
+
+        <!-- Phone Number -->
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="30dp"
             android:text="Phone Number"
-            android:textColor="#FFFFFF"
-            android:textStyle="bold"/>
-
+            android:textColor="#AAAAAA"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp"/>
 
         <EditText
-            android:id="@+id/etPhone"
+            android:id="@+id/etPhoneNumber"
             android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:hint="+91 98XXXXXXXX"
+            android:layout_height="52dp"
+            android:hint="+91 XXXXX XXXXX"
             android:inputType="phone"
             android:textColor="#FFFFFF"
-            android:textColorHint="#666D78"/>
+            android:textColorHint="#666666"
+            android:background="@android:drawable/edit_text"
+            android:padding="12dp"
+            android:layout_marginBottom="20dp"/>
 
 
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Enter the number associated with this device."
-            android:textColor="#8C95A3"
-            android:textSize="12sp"/>
-
-
-        <Button
-            android:id="@+id/btnSave"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="20dp"
-            android:text="Save Device"/>
-
-
-        <Button
-            android:id="@+id/btnPermissions"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="12dp"
-            android:text="Allow SMS Access"/>
-
-
-        <TextView
-            android:id="@+id/tvStatus"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:gravity="center"
-            android:text="Waiting..."
-            android:textColor="#35D07F"
-            android:textSize="14sp"
-            android:textStyle="bold"/>
-
-
-        <View
-            android:layout_width="match_parent"
-            android:layout_height="1dp"
-            android:layout_marginTop="30dp"
-            android:background="#292F38"/>
-
+        <!-- API Endpoint -->
 
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:layout_marginTop="22dp"
-            android:text="Information"
-            android:textColor="#FFFFFF"
-            android:textSize="17sp"
-            android:textStyle="bold"/>
+            android:text="API Endpoint"
+            android:textColor="#AAAAAA"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp"/>
 
+        <EditText
+            android:id="@+id/etApiUrl"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="https://example.com/api/messages"
+            android:inputType="textUri"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:background="@android:drawable/edit_text"
+            android:padding="12dp"
+            android:layout_marginBottom="20dp"/>
+
+
+        <!-- Device ID -->
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Device ID"
+            android:textColor="#AAAAAA"
+            android:textSize="14sp"
+            android:layout_marginBottom="6dp"/>
+
+        <EditText
+            android:id="@+id/etDeviceId"
+            android:layout_width="match_parent"
+            android:layout_height="52dp"
+            android:hint="Device identifier"
+            android:inputType="text"
+            android:textColor="#FFFFFF"
+            android:textColorHint="#666666"
+            android:background="@android:drawable/edit_text"
+            android:padding="12dp"
+            android:layout_marginBottom="24dp"/>
+
+
+        <!-- Buttons -->
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="horizontal"
+            android:gravity="center"
+            android:layout_marginBottom="28dp">
+
+            <Button
+                android:id="@+id/btnSave"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:text="Save Config"
+                android:textAllCaps="false"
+                android:backgroundTint="#4CAF50"
+                android:layout_marginEnd="6dp"/>
+
+            <Button
+                android:id="@+id/btnCheckPerms"
+                android:layout_width="0dp"
+                android:layout_height="50dp"
+                android:layout_weight="1"
+                android:text="Check Permissions"
+                android:textAllCaps="false"
+                android:backgroundTint="#2196F3"
+                android:layout_marginStart="6dp"/>
+
+        </LinearLayout>
+
+
+        <!-- Status Card -->
+
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="STATUS"
+            android:textColor="#777777"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:layout_marginBottom="10dp"/>
+
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical"
+            android:padding="16dp"
+            android:background="#181A20">
+
+
+            <!-- SMS Permission -->
+
+            <TextView
+                android:id="@+id/tvSmsPermission"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="SMS Permission&#10;Checking..."
+                android:textColor="#AAAAAA"
+                android:textSize="15sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp"/>
+
+
+            <!-- Notification Permission -->
+
+            <TextView
+                android:id="@+id/tvNotificationPermission"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Notification Permission&#10;Checking..."
+                android:textColor="#AAAAAA"
+                android:textSize="15sp"
+                android:lineSpacingExtra="3dp"
+                android:layout_marginBottom="16dp"/>
+
+
+            <!-- Service -->
+
+            <TextView
+                android:id="@+id/tvServiceStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="● Checking service..."
+                android:textColor="#FFAA00"
+                android:textSize="15sp"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp"/>
+
+
+            <!-- General Status -->
+
+            <TextView
+                android:id="@+id/tvStatus"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Checking..."
+                android:textColor="#AAAAAA"
+                android:textSize="13sp"/>
+
+        </LinearLayout>
+
+
+        <!-- Footer -->
 
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_marginTop="10dp"
-            android:text="The dashboard can show your entered phone number, device model, Android version, app version, battery level, charging state and last connection time."
-            android:textColor="#8C95A3"
-            android:textSize="13sp"/>
+            android:text="SMS forwarding requires the required Android permissions."
+            android:textColor="#666666"
+            android:textSize="12sp"
+            android:gravity="center"
+            android:layout_marginTop="24dp"/>
 
     </LinearLayout>
 
