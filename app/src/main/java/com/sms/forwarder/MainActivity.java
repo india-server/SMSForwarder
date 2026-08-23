@@ -36,7 +36,7 @@ public class MainActivity extends AppCompatActivity {
     private static final int SMS_PERMISSION = 100;
 
     private static final String API =
-            "https://smssend-8ek4.onrender.com";
+            "https://backend.aerivue.dev";
 
     private static final MediaType JSON =
             MediaType.parse(
