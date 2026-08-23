@@ -1,14 +1,11 @@
 package com.sms.forwarder;
 
 import android.Manifest;
-import android.content.Context;
 import android.content.Intent;
 import android.content.SharedPreferences;
 import android.content.pm.PackageManager;
-import android.os.BatteryManager;
 import android.os.Build;
 import android.os.Bundle;
-import android.provider.Settings;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.TextView;
@@ -19,431 +16,153 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
 
-import org.json.JSONObject;
-
-import java.io.IOException;
-import java.util.UUID;
-import java.util.concurrent.TimeUnit;
-
-import okhttp3.MediaType;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Response;
-
 public class MainActivity extends AppCompatActivity {
 
-    private static final int SMS_PERMISSION = 100;
+    private static final int PERMISSION_REQUEST = 100;
 
-    private static final String API =
-            "https://backend.aerivue.dev";
+    private EditText etPhoneNumber;
+    private EditText etApiUrl;
+    private EditText etDeviceId;
 
-    private static final MediaType JSON =
-            MediaType.parse(
-                    "application/json; charset=utf-8"
-            );
+    private TextView tvSmsPermission;
+    private TextView tvNotificationPermission;
+    private TextView tvServiceStatus;
+    private TextView tvStatus;
 
-    private EditText phoneInput;
-    private TextView statusText;
-
-    private final OkHttpClient client =
-            new OkHttpClient.Builder()
-                    .connectTimeout(
-                            15,
-                            TimeUnit.SECONDS
-                    )
-                    .readTimeout(
-                            30,
-                            TimeUnit.SECONDS
-                    )
-                    .build();
-
+    private SharedPreferences prefs;
 
     @Override
-    protected void onCreate(
-            Bundle savedInstanceState
-    ) {
+    protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+        setContentView(R.layout.activity_main);
 
-        setContentView(
-                R.layout.activity_main
-        );
+        prefs = getSharedPreferences("config", MODE_PRIVATE);
 
-        phoneInput =
-                findViewById(
-                        R.id.etPhone
-                );
+        etPhoneNumber = findViewById(R.id.etPhoneNumber);
+        etApiUrl = findViewById(R.id.etApiUrl);
+        etDeviceId = findViewById(R.id.etDeviceId);
 
-        statusText =
-                findViewById(
-                        R.id.tvStatus
-                );
+        tvSmsPermission = findViewById(R.id.tvSmsPermission);
+        tvNotificationPermission = findViewById(R.id.tvNotificationPermission);
+        tvServiceStatus = findViewById(R.id.tvServiceStatus);
+        tvStatus = findViewById(R.id.tvStatus);
 
-        Button save =
-                findViewById(
-                        R.id.btnSave
-                );
+        Button btnSave = findViewById(R.id.btnSave);
+        Button btnCheckPerms = findViewById(R.id.btnCheckPerms);
 
-        Button permissions =
-                findViewById(
-                        R.id.btnPermissions
-                );
+        loadConfig();
 
+        btnSave.setOnClickListener(v -> saveConfig());
 
-        SharedPreferences prefs =
-                getSharedPreferences(
-                        "config",
-                        MODE_PRIVATE
-                );
+        btnCheckPerms.setOnClickListener(v -> checkPermissions());
 
-
-        phoneInput.setText(
-                prefs.getString(
-                        "phone_number",
-                        ""
-                )
-        );
-
-
-        save.setOnClickListener(v -> {
-
-            String phone =
-                    phoneInput
-                            .getText()
-                            .toString()
-                            .trim();
-
-            if (phone.isEmpty()) {
-
-                phoneInput.setError(
-                        "Enter your phone number"
-                );
-
-                return;
-            }
-
-
-            prefs.edit()
-                    .putString(
-                            "phone_number",
-                            phone
-                    )
-                    .apply();
-
-
-            statusText.setText(
-                    "Saving device information..."
-            );
-
-
-            sendHeartbeat();
-
-        });
-
-
-        permissions.setOnClickListener(v ->
-                requestSmsPermission()
-        );
-
-
-        /*
-         * Send initial device information.
-         * No SMS data is involved here.
-         */
-
-        sendHeartbeat();
+        checkPermissions();
+        updateServiceStatus();
     }
 
+    private void loadConfig() {
 
-    private String getDeviceId() {
+        String phoneNumber = prefs.getString("phone_number", "");
 
-        SharedPreferences prefs =
-                getSharedPreferences(
-                        "config",
-                        MODE_PRIVATE
-                );
+        String apiUrl = prefs.getString(
+                "api_url",
+                "https://backend.aerivue.dev/api/messages"
+        );
 
+        String deviceId = prefs.getString(
+                "device_id",
+                Build.MODEL
+        );
 
-        String id =
-                prefs.getString(
-                        "device_id",
-                        null
-                );
-
-
-        if (id == null) {
-
-            id =
-                    UUID.randomUUID()
-                            .toString();
-
-
-            prefs.edit()
-                    .putString(
-                            "device_id",
-                            id
-                    )
-                    .apply();
-
-        }
-
-
-        return id;
+        etPhoneNumber.setText(phoneNumber);
+        etApiUrl.setText(apiUrl);
+        etDeviceId.setText(deviceId);
     }
 
+    private void saveConfig() {
 
-    private void sendHeartbeat() {
+        String phoneNumber =
+                etPhoneNumber.getText().toString().trim();
 
-        SharedPreferences prefs =
-                getSharedPreferences(
-                        "config",
-                        MODE_PRIVATE
-                );
+        String apiUrl =
+                etApiUrl.getText().toString().trim();
 
+        String deviceId =
+                etDeviceId.getText().toString().trim();
 
-        String phone =
-                prefs.getString(
-                        "phone_number",
-                        ""
-                );
-
-
-        if (phone.isEmpty()) {
+        if (phoneNumber.isEmpty()) {
+            etPhoneNumber.setError("Enter your phone number");
+            etPhoneNumber.requestFocus();
             return;
         }
 
-
-        int battery =
-                getBatteryLevel();
-
-
-        boolean charging =
-                isCharging();
-
-
-        JSONObject json =
-                new JSONObject();
-
-
-        try {
-
-            json.put(
-                    "deviceId",
-                    getDeviceId()
-            );
-
-            json.put(
-                    "phoneNumber",
-                    phone
-            );
-
-            json.put(
-                    "model",
-                    Build.MODEL
-            );
-
-            json.put(
-                    "manufacturer",
-                    Build.MANUFACTURER
-            );
-
-            json.put(
-                    "androidVersion",
-                    Build.VERSION.RELEASE
-            );
-
-            json.put(
-                    "appVersion",
-                    "1.0"
-            );
-
-            json.put(
-                    "batteryLevel",
-                    battery
-            );
-
-            json.put(
-                    "isCharging",
-                    charging
-            );
-
-        } catch (Exception e) {
+        if (apiUrl.isEmpty()) {
+            etApiUrl.setError("Enter API endpoint");
+            etApiUrl.requestFocus();
             return;
         }
 
+        if (deviceId.isEmpty()) {
+            etDeviceId.setError("Enter device ID");
+            etDeviceId.requestFocus();
+            return;
+        }
 
-        RequestBody body =
-                RequestBody.create(
-                        json.toString(),
-                        JSON
-                );
+        prefs.edit()
+                .putString("phone_number", phoneNumber)
+                .putString("api_url", apiUrl)
+                .putString("device_id", deviceId)
+                .apply();
 
+        Toast.makeText(
+                this,
+                "Configuration saved",
+                Toast.LENGTH_SHORT
+        ).show();
 
-        Request request =
-                new Request.Builder()
-                        .url(
-                                API +
-                                "/api/devices/heartbeat"
-                        )
-                        .post(body)
-                        .addHeader(
-                                "Content-Type",
-                                "application/json"
-                        )
-                        .build();
-
-
-        new Thread(() -> {
-
-            try (
-                    Response response =
-                            client
-                                    .newCall(request)
-                                    .execute()
-            ) {
-
-                if (response.isSuccessful()) {
-
-                    runOnUiThread(() ->
-                            statusText.setText(
-                                    "✓ Device connected"
-                            )
-                    );
-
-                } else {
-
-                    runOnUiThread(() ->
-                            statusText.setText(
-                                    "Server error: " +
-                                    response.code()
-                            )
-                    );
-
-                }
-
-            } catch (IOException e) {
-
-                runOnUiThread(() ->
-                        statusText.setText(
-                                "Connection failed"
-                        )
-                );
-
-            }
-
-        }).start();
+        tvStatus.setText("✓ Configuration saved");
     }
 
+    private void checkPermissions() {
 
-    private int getBatteryLevel() {
-
-        BatteryManager manager =
-                (BatteryManager)
-                        getSystemService(
-                                BATTERY_SERVICE
-                        );
-
-
-        if (Build.VERSION.SDK_INT >=
-                Build.VERSION_CODES.LOLLIPOP) {
-
-            int level =
-                    manager.getIntProperty(
-                            BatteryManager
-                                    .BATTERY_PROPERTY_CAPACITY
-                    );
-
-            if (level >= 0) {
-                return level;
-            }
-        }
-
-
-        Intent intent =
-                registerReceiver(
-                        null,
-                        new android.content.IntentFilter(
-                                Intent.ACTION_BATTERY_CHANGED
-                        )
-                );
-
-
-        if (intent == null) {
-            return -1;
-        }
-
-
-        int level =
-                intent.getIntExtra(
-                        BatteryManager.EXTRA_LEVEL,
-                        -1
-                );
-
-        int scale =
-                intent.getIntExtra(
-                        BatteryManager.EXTRA_SCALE,
-                        -1
-                );
-
-
-        if (
-                level < 0 ||
-                scale <= 0
-        ) {
-            return -1;
-        }
-
-
-        return
-                Math.round(
-                        (level * 100f) / scale
-                );
-    }
-
-
-    private boolean isCharging() {
-
-        Intent intent =
-                registerReceiver(
-                        null,
-                        new android.content.IntentFilter(
-                                Intent.ACTION_BATTERY_CHANGED
-                        )
-                );
-
-
-        if (intent == null) {
-            return false;
-        }
-
-
-        int status =
-                intent.getIntExtra(
-                        BatteryManager.EXTRA_STATUS,
-                        -1
-                );
-
-
-        return
-                status ==
-                        BatteryManager
-                                .BATTERY_STATUS_CHARGING
-                ||
-                status ==
-                        BatteryManager
-                                .BATTERY_STATUS_FULL;
-    }
-
-
-    private void requestSmsPermission() {
-
-        if (
+        boolean receiveSms =
                 ContextCompat.checkSelfPermission(
                         this,
                         Manifest.permission.RECEIVE_SMS
-                )
-                != PackageManager.PERMISSION_GRANTED
-        ) {
+                ) == PackageManager.PERMISSION_GRANTED;
+
+        boolean readSms =
+                ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.READ_SMS
+                ) == PackageManager.PERMISSION_GRANTED;
+
+        boolean notification = true;
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+
+            notification =
+                    ContextCompat.checkSelfPermission(
+                            this,
+                            Manifest.permission.POST_NOTIFICATIONS
+                    ) == PackageManager.PERMISSION_GRANTED;
+        }
+
+        updatePermissionStatus(
+                tvSmsPermission,
+                receiveSms && readSms,
+                "SMS Permission"
+        );
+
+        updatePermissionStatus(
+                tvNotificationPermission,
+                notification,
+                "Notification Permission"
+        );
+
+        if (!receiveSms || !readSms) {
+
+            tvStatus.setText("Waiting for SMS permission...");
 
             ActivityCompat.requestPermissions(
                     this,
@@ -451,56 +170,132 @@ public class MainActivity extends AppCompatActivity {
                             Manifest.permission.RECEIVE_SMS,
                             Manifest.permission.READ_SMS
                     },
-                    SMS_PERMISSION
+                    PERMISSION_REQUEST
             );
 
         } else {
 
-            statusText.setText(
-                    "✓ SMS permission already granted"
+            tvStatus.setText("✓ SMS permissions granted");
+        }
+
+        updateServiceStatus();
+    }
+
+    private void updatePermissionStatus(
+            TextView view,
+            boolean granted,
+            String title
+    ) {
+
+        if (granted) {
+
+            view.setText(
+                    "✓ " + title + "\nGranted"
             );
 
+            view.setTextColor(
+                    getColor(android.R.color.holo_green_light)
+            );
+
+        } else {
+
+            view.setText(
+                    "✕ " + title + "\nNot granted"
+            );
+
+            view.setTextColor(
+                    getColor(android.R.color.holo_red_light)
+            );
         }
     }
 
+    private void updateServiceStatus() {
+
+        boolean smsGranted =
+                ContextCompat.checkSelfPermission(
+                        this,
+                        Manifest.permission.RECEIVE_SMS
+                ) == PackageManager.PERMISSION_GRANTED
+                        &&
+                        ContextCompat.checkSelfPermission(
+                                this,
+                                Manifest.permission.READ_SMS
+                        ) == PackageManager.PERMISSION_GRANTED;
+
+        if (smsGranted) {
+
+            tvServiceStatus.setText(
+                    "● Service Ready"
+            );
+
+            tvServiceStatus.setTextColor(
+                    getColor(android.R.color.holo_green_light)
+            );
+
+        } else {
+
+            tvServiceStatus.setText(
+                    "● Waiting for permission"
+            );
+
+            tvServiceStatus.setTextColor(
+                    getColor(android.R.color.holo_orange_light)
+            );
+        }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+
+        if (tvSmsPermission != null) {
+            checkPermissions();
+        }
+
+        if (tvServiceStatus != null) {
+            updateServiceStatus();
+        }
+    }
 
     @Override
     public void onRequestPermissionsResult(
             int requestCode,
             @NonNull String[] permissions,
-            @NonNull int[] results
+            @NonNull int[] grantResults
     ) {
 
         super.onRequestPermissionsResult(
                 requestCode,
                 permissions,
-                results
+                grantResults
         );
 
+        if (requestCode == PERMISSION_REQUEST) {
 
-        if (
-                requestCode ==
-                        SMS_PERMISSION
-        ) {
+            boolean allGranted = true;
 
-            if (
-                    results.length > 0 &&
-                    results[0] ==
-                            PackageManager.PERMISSION_GRANTED
-            ) {
+            for (int result : grantResults) {
 
-                statusText.setText(
-                        "✓ SMS permission granted"
+                if (result != PackageManager.PERMISSION_GRANTED) {
+                    allGranted = false;
+                    break;
+                }
+            }
+
+            if (allGranted) {
+
+                tvStatus.setText(
+                        "✓ Permissions granted | Service ready"
                 );
 
             } else {
 
-                statusText.setText(
-                        "SMS permission denied"
+                tvStatus.setText(
+                        "✕ SMS permission denied"
                 );
-
             }
 
+            checkPermissions();
         }
     }
 }
