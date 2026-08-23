@@ -96,7 +96,7 @@ public class ForwardService extends Service {
             String apiUrl =
                     prefs.getString(
                             "api_url",
-                            "https://smssend-8ek4.onrender.com/api/messages"
+                            "https://backend.aerivue.dev/api/messages"
                     );
 
             String deviceId =
